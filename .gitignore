@@ -1,0 +1,42 @@
+# ==============================================================
+# .gitignore pour projet PHITS
+# Garde UNIQUEMENT les fichiers source (.inp, scripts, docs)
+# Ignore TOUS les résultats de simulation (lourds et régénérables)
+# ==============================================================
+
+# --- RÉSULTATS DE SIMULATION PHITS (régénérables) ---
+*.eps
+*.out
+*.dat
+*.in
+
+# --- VIDÉOS ET MÉDIAS LOURDS ---
+*.mp4
+*.avi
+*.mov
+*.mkv
+
+# --- ARCHIVES ---
+*.zip
+*.rar
+*.7z
+
+# --- FICHIERS TEMPORAIRES PHITS ---
+*.tmp
+*.bak
+*.log
+*~
+error.ang
+*.o[0-9]*
+pegs5.dat
+pegs5.tmp
+pegs5.msfit
+pegs5job.ssl
+
+# --- WINDOWS ---
+Thumbs.db
+Desktop.ini
+
+# --- VS CODE ---
+.vscode/
+Microsoft VS Code/
