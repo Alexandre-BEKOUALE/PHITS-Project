@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <title>ModernYde Level 2 — Vue 3D Interactive (Sans dépendance)</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { background: #0a0d14; overflow: hidden; font-family: 'Segoe UI', Arial, sans-serif; color: #fff; }
+    canvas { display: block; width: 100vw; height: 100vh; cursor: grab; }
+    canvas:active { cursor: grabbing; }
+    #panel {
+      position: absolute; top: 20px; left: 20px;
+      background: rgba(10, 15, 30, 0.85);
+      backdrop-filter: blur(15px);
+      border: 1px solid rgba(0, 200, 255, 0.2);
+      border-radius: 16px;
+      padding: 20px;
+      width: 290px;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+    }
+    #panel h3 { font-size: 16px; font-weight: 600; margin-bottom: 12px; color: #00c8ff; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 8px; }
+    .material-item { display: flex; align-items: center; margin-bottom: 8px; font-size: 13px; }
+    .swatch { width: 16px; height: 16px; border-radius: 4px; margin-right: 10px; border: 1px solid rgba(255,255,255,0.2); }
+    .dim-info { font-size: 11px; color: #8892b0; margin-top: 15px; padding-top: 12px; border-top: 1px solid rgba(255,255,255,0.08); line-height: 1.6; }
+    #hint {
+      position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%);
+      background: rgba(0, 0, 0, 0.7);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 30px;
+      padding: 8px 24px;
+      font-size: 12px;
+      color: #8892b0;
+      letter-spacing: 0.5px;
+      pointer-events: none;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+
+<canvas id="renderCanvas"></canvas>
+
+<div id="panel">
+  <h3>🏢 ModernYde Level 2 (2 Étages)</h3>
+  <div class="material-item">
+    <div class="swatch" style="background: rgba(255, 100, 100, 0.85);"></div>
+    <span>Murs & Dalles Béton (MAT3)</span>
+  </div>
+  <div class="material-item">
+    <div class="swatch" style="background: rgba(50, 150, 255, 0.25);"></div>
+    <span>Air intérieur RDC/R+1 (MAT1)</span>
+  </div>
+  <div class="material-item">
+    <div class="swatch" style="background: rgba(130, 105, 85, 0.9);"></div>
+    <span>Sol naturel (MAT5)</span>
+  </div>
+  <div class="dim-info">
+    <strong>Dimensions Réelles :</strong><br>
+    • Pièce par étage : 5.0m × 5.0m<br>
+    • Hauteur RDC : 2.50m (Slab R+1 à 2.80m)<br>
+    • Hauteur R+1 : 2.20m (Slab toit à 5.30m)<br>
+    • Épaisseur murs : 24 cm<br>
+    • Hauteur totale : 5.30m<br>
+    • Sphere source : R = 25.0m
+  </div>
+</div>
+
+<div id="hint">🖱️ Glisser pour Pivoter | ⚙️ Molette pour Zoomer | ⌨️ Flèches pour Déplacer</div>
+
+<script>
+const canvas = document.getElementById('renderCanvas');
+const ctx = canvas.getContext('2d');
+
+let width, height;
+function resize() {
+  width = canvas.width = window.innerWidth;
+  height = canvas.height = window.innerHeight;
+}
+window.addEventListener('resize', resize);
+resize();
+
+// ─── 3D VIEW STATE ──────────────────────────────────────────────────────────
+let yaw = 0.65;   // Rotation Y
+let pitch = 0.35; // Rotation X
+let zoom = 1.0;  // Zoom multiplier
+let panX = 0;    // Pan offset X
+let panY = 70;   // Pan offset Y (decentré légèrement vers le bas pour le 2 étages)
+
+// ─── GEOMETRY DEFINITIONS (in meters) ───────────────────────────────────────
+const vertices = [];
+const shapes = [];
+
+function addCube(x0, x1, y0, y1, z0, z1, color, label, opacity=0.85, isWireOnly=false) {
+  const startIdx = vertices.length;
+  // Define 8 vertices of a cube
+  vertices.push(
+    {x: x0, y: y0, z: z0}, // 0
+    {x: x1, y: y0, z: z0}, // 1
+    {x: x1, y: y1, z: z0}, // 2
+    {x: x0, y: y1, z: z0}, // 3
+    {x: x0, y: y0, z: z1}, // 4
+    {x: x1, y: y0, z: z1}, // 5
+    {x: x1, y: y1, z: z1}, // 6
+    {x: x0, y: y1, z: z1}  // 7
+  );
+
+  // Define 6 faces (quads)
+  const faces = [
+    [0, 1, 2, 3], // Front
+    [1, 5, 6, 2], // Right
+    [5, 4, 7, 6], // Back
+    [4, 0, 3, 7], // Left
+    [3, 2, 6, 7], // Top
+    [4, 5, 1, 0]  // Bottom
+  ];
+
+  faces.forEach(f => {
+    shapes.push({
+      indices: f.map(idx => startIdx + idx),
+      color: color,
+      label: label,
+      opacity: opacity,
+      isWireOnly: isWireOnly
+    });
+  });
+}
+
+// 1. Earth/Ground: thickness 0.6m, width 14m
+addCube(-8.0, 8.0, -0.6, 0.0, -8.0, 8.0, 'rgba(130, 105, 85, 0.85)', 'Ground', 0.9);
+
+// 2. Level 1 Concrete Walls & Slab (RDC): z = 0.0 to 2.80m, x/y = ±2.74m
+addCube(-2.74, 2.74, 0.0, 2.80, -2.74, 2.74, 'rgba(255, 100, 100, 0.72)', 'Concrete L1', 0.72);
+
+// 3. Level 1 Interior Air (RDC): z = 0.0 to 2.50m, x/y = ±2.50m
+addCube(-2.50, 2.50, 0.0, 2.50, -2.50, 2.50, 'rgba(50, 150, 255, 0.15)', 'Air L1', 0.15);
+
+// 4. Level 2 Concrete Walls & Slab (R+1): z = 2.80 to 5.30m, x/y = ±2.74m
+addCube(-2.74, 2.74, 2.80, 5.30, -2.74, 2.74, 'rgba(255, 100, 100, 0.72)', 'Concrete L2', 0.72);
+
+// 5. Level 2 Interior Air (R+1): z = 2.80 to 5.00m, x/y = ±2.50m
+addCube(-2.50, 2.50, 2.80, 5.00, -2.50, 2.50, 'rgba(50, 150, 255, 0.15)', 'Air L2', 0.15);
+
+// 6. Source Bounding Box (representing the 25m source sphere in lightweight style)
+addCube(-12.0, 12.0, 0.0, 12.0, -12.0, 12.0, 'rgba(0, 255, 255, 0.25)', 'Source Sphere', 0.2, true);
+
+// ─── 3D PROJECTION ENGINE ───────────────────────────────────────────────────
+function project(p) {
+  // Rotate Y (Yaw)
+  let cosY = Math.cos(yaw);
+  let sinY = Math.sin(yaw);
+  let x1 = p.x * cosY - p.z * sinY;
+  let z1 = p.x * sinY + p.z * cosY;
+
+  // Rotate X (Pitch)
+  let cosX = Math.cos(pitch);
+  let sinX = Math.sin(pitch);
+  let y2 = p.y * cosX - z1 * sinX;
+  let z2 = p.y * sinX + z1 * cosX;
+
+  // Camera Distance (decentré pour voir la hauteur de 2 étages)
+  let cameraDist = 22 * zoom;
+  let screenZ = z2 + cameraDist;
+  
+  // Perspective Projection
+  let scale = (width / 2) / (screenZ * 0.24);
+  let px = width / 2 + x1 * scale + panX;
+  let py = height / 2 - y2 * scale + panY;
+
+  return { x: px, y: py, z: screenZ };
+}
+
+// ─── DRAW LOOP ──────────────────────────────────────────────────────────────
+function draw() {
+  ctx.fillStyle = '#0a0d14';
+  ctx.fillRect(0, 0, width, height);
+
+  // Draw a grid on the ground plane
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.05)';
+  ctx.lineWidth = 1;
+  const gridRange = 10;
+  const gridStep = 1.25;
+  
+  const gridLines = [];
+  for (let i = -gridRange; i <= gridRange; i += gridStep) {
+    gridLines.push({p0: {x: i, y: 0.01, z: -gridRange}, p1: {x: i, y: 0.01, z: gridRange}});
+    gridLines.push({p0: {x: -gridRange, y: 0.01, z: i}, p1: {x: gridRange, y: 0.01, z: i}});
+  }
+
+  // Draw ground grid
+  gridLines.forEach(line => {
+    let pt0 = project(line.p0);
+    let pt1 = project(line.p1);
+    if (pt0.z > 0.1 && pt1.z > 0.1) {
+      ctx.beginPath();
+      ctx.moveTo(pt0.x, pt0.y);
+      ctx.lineTo(pt1.x, pt1.y);
+      ctx.stroke();
+    }
+  });
+
+  // Project all vertices
+  const projVertices = vertices.map(v => project(v));
+
+  // Compute depths of all shapes (average Z coordinate of its projected vertices)
+  const renderedShapes = shapes.map((shape, index) => {
+    let sumZ = 0;
+    shape.indices.forEach(idx => sumZ += projVertices[idx].z);
+    let avgZ = sumZ / shape.indices.length;
+    return { shape, avgZ, index };
+  });
+
+  // Sort by depth (Painter's algorithm: draw furthest first)
+  renderedShapes.sort((a, b) => b.avgZ - a.avgZ);
+
+  // Draw the shapes
+  renderedShapes.forEach(({ shape }) => {
+    // Check if all projected vertices are in front of camera
+    let valid = true;
+    shape.indices.forEach(idx => {
+      if (projVertices[idx].z <= 0.1) valid = false;
+    });
+    if (!valid) return;
+
+    // Draw faces
+    ctx.beginPath();
+    ctx.moveTo(projVertices[shape.indices[0]].x, projVertices[shape.indices[0]].y);
+    for (let i = 1; i < shape.indices.length; i++) {
+      ctx.lineTo(projVertices[shape.indices[i]].x, projVertices[shape.indices[i]].y);
+    }
+    ctx.closePath();
+
+    if (!shape.isWireOnly) {
+      ctx.fillStyle = shape.color;
+      ctx.fill();
+    }
+
+    // Glowing edges
+    ctx.strokeStyle = shape.isWireOnly ? shape.color : 'rgba(255, 255, 255, 0.15)';
+    ctx.lineWidth = shape.isWireOnly ? 1 : 1.5;
+    ctx.stroke();
+  });
+
+  // Draw coordinate axis at the corner
+  drawAxis();
+}
+
+function drawAxis() {
+  const origin = {x: 5.5, y: 0.1, z: 5.5};
+  const axes = [
+    {dir: {x: 1, y: 0, z: 0}, col: '#ff5555', label: 'X'},
+    {dir: {x: 0, y: 1, z: 0}, col: '#55ff55', label: 'Z'},
+    {dir: {x: 0, y: 0, z: 1}, col: '#5555ff', label: 'Y'}
+  ];
+
+  const ptO = project(origin);
+  axes.forEach(a => {
+    const end = {x: origin.x + a.dir.x * 1.5, y: origin.y + a.dir.y * 1.5, z: origin.z + a.dir.z * 1.5};
+    const ptE = project(end);
+    if (ptO.z > 0.1 && ptE.z > 0.1) {
+      ctx.beginPath();
+      ctx.moveTo(ptO.x, ptO.y);
+      ctx.lineTo(ptE.x, ptE.y);
+      ctx.strokeStyle = a.col;
+      ctx.lineWidth = 2.5;
+      ctx.stroke();
+
+      ctx.fillStyle = a.col;
+      ctx.font = 'bold 12px sans-serif';
+      ctx.fillText(a.label, ptE.x + 5, ptE.y + 5);
+    }
+  });
+}
+
+// ─── USER INTERACTION ────────────────────────────────────────────────────────
+let isDragging = false;
+let startMouseX = 0;
+let startMouseY = 0;
+
+canvas.addEventListener('mousedown', e => {
+  if (e.button === 0) { // Left click
+    isDragging = true;
+    startMouseX = e.clientX;
+    startMouseY = e.clientY;
+  }
+});
+
+window.addEventListener('mousemove', e => {
+  if (isDragging) {
+    let dx = e.clientX - startMouseX;
+    let dy = e.clientY - startMouseY;
+    
+    yaw += dx * 0.007;
+    pitch += dy * 0.007;
+
+    // Constrain pitch rotation
+    pitch = Math.max(-Math.PI/2.1, Math.min(Math.PI/2.1, pitch));
+
+    startMouseX = e.clientX;
+    startMouseY = e.clientY;
+    
+    draw();
+  }
+});
+
+window.addEventListener('mouseup', () => {
+  isDragging = false;
+});
+
+// Zoom control with wheel
+window.addEventListener('wheel', e => {
+  zoom += e.deltaY * 0.001;
+  zoom = Math.max(0.2, Math.min(4.0, zoom));
+  draw();
+});
+
+// Pan control with arrow keys
+window.addEventListener('keydown', e => {
+  const panStep = 15;
+  if (e.key === 'ArrowLeft')  { panX -= panStep; draw(); }
+  if (e.key === 'ArrowRight') { panX += panStep; draw(); }
+  if (e.key === 'ArrowUp')    { panY -= panStep; draw(); }
+  if (e.key === 'ArrowDown')  { panY += panStep; draw(); }
+});
+
+// Initial draw
+draw();
+</script>
+</body>
+</html>
